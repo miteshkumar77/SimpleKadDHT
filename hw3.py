@@ -5,7 +5,7 @@ import sys  # For sys.argv, sys.exit()
 import socket  # for gethostbyname()
 import grpc
 from typing import List
-from hw3_utils import csci4220_hw3_pb2_grpc, KadImplServicer, KadEventHandler
+from hw3_handler import KadEventHandler, KadImplServicer
 import csci4220_hw3_pb2
 import csci4220_hw3_pb2_grpc
 
@@ -35,7 +35,7 @@ def run():
     csci4220_hw3_pb2_grpc.add_KadImplServicer_to_server(
         KadImplServicer(event_handler.FindNodeRPC, event_handler.FindValueRPC, event_handler.StoreRPC, event_handler.QuitRPC), server)
 
-    port = server.add_insecure_port(my_address + ":" + str(my_port))
+    port = server.add_insecure_port(f'[::]:{my_port}')
     server.start()
 
     print(f"grpc server started at {my_address}, port: {port}")
