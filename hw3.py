@@ -38,7 +38,7 @@ def run():
     port = server.add_insecure_port(f'[::]:{my_port}')
     server.start()
 
-    print(f"grpc server started at {my_address}, port: {port}")
+    # print(f"grpc server started at {my_address}, port: {port}")
 
     while True:
         command_list = sys.stdin.readline().strip('\n').strip(' ').split(' ')
@@ -51,13 +51,8 @@ def run():
         event_handler[command](*args)
         if command == 'QUIT':
             break
-
-    server.wait_for_termination()
-
-    #remote_addr = socket.gethostbyname(remote_addr_string)
-    #remote_port = int(remote_port_string)
-    #channel = grpc.insecure_channel(remote_addr + ':' + str(remote_port))
-
+    
+    server.stop(grace=None)
 
 if __name__ == '__main__':
     run()

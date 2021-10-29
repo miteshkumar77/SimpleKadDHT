@@ -20,7 +20,9 @@ class LRUCache():
             self.call_on_add(key)
             if len(self.lru_list) > self.MaxSize:
                 self.call_on_evict(self.lru_list.popitem(last=False)[0])
-
+    def remove(self, key : int):
+        self.call_on_evict(key)
+        del self.lru_list[key]
     def make_mru(self, key: int):
         self.lru_list.move_to_end(key, last=True)
     
@@ -92,6 +94,10 @@ class RoutingTable():
         k_closest_strids = self.BinTrie.k_closest(id_to_str(id=id, N=self.N), k=self.K)
         k_closest_ids = [str_to_id(_id) for _id in k_closest_strids]
         return [self.id_lookup(_id) for _id in k_closest_ids]
+    def n_closest(self, id : int, n) -> List[csci4220_hw3_pb2.Node]:
+        n_closest_strids = self.BinTrie.k_closest(id_to_str(id=id, N=self.N), k=n)
+        n_closest_ids = [str_to_id(_id) for _id in n_closest_strids]
+        return [self.id_lookup(_id) for _id in n_closest_ids]
 
     def bucket_of_id(self, id : int):
         return self.LRUList[get_bucket_idx(self.me.id, id)]
@@ -100,6 +106,9 @@ class RoutingTable():
         if id == self.me.id:
             return self.me
         return self.bucket_of_id(id).get(id)
+    
+    def remove(self, id : int):
+        self.bucket_of_id(id).remove(id)
     
     def put(self, node : csci4220_hw3_pb2.Node):
         if node.id == self.me.id:
@@ -110,11 +119,17 @@ class RoutingTable():
         if id == self.me.id:
             return
         self.bucket_of_id(id).make_mru(id)
+    
+    def all_nodes(self):
+        for lru_list in self.LRUList:
+            for node in lru_list.lru_list.values():
+                yield node
 
     def buckets_to_str(self):
         def make_entry(node : csci4220_hw3_pb2.Node): return f"{node.id}:{node.port}"
         def make_row(lru_cache : LRUCache): return ' '.join(map(make_entry, lru_cache.list_lru_items()))
-        return '\n'.join(f"{idx} {make_row(lru_cache)}" for idx, lru_cache in enumerate(self.LRUList))
+        def fmt_row(row): return '' if row == '' else ' ' + row
+        return '\n'.join(f"{idx}:{fmt_row(make_row(lru_cache))}" for idx, lru_cache in enumerate(self.LRUList))
 
 if __name__ == "__main__":
     B = BinaryTrie()

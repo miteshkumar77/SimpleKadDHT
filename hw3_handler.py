@@ -4,6 +4,7 @@ import csci4220_hw3_pb2_grpc
 import grpc
 import socket
 from hw3_routing import RoutingTable
+from hw3_utils import distance, get_bucket_idx
 
 class KadImplServicer(csci4220_hw3_pb2_grpc.KadImplServicer):
     def __init__(self, FindNodeRPC, FindValueRPC, StoreRPC, QuitRPC):
@@ -15,14 +16,14 @@ class KadImplServicer(csci4220_hw3_pb2_grpc.KadImplServicer):
     def FindNode(self, request : csci4220_hw3_pb2.IDKey, context):
         return self.FindNodeRPC(request.node, request.idkey)
 
-    def FindValue(self, request, context):
-        return self.FindValueRPC(request, context)
+    def FindValue(self, request : csci4220_hw3_pb2.IDKey, context):
+        return self.FindValueRPC(request.node, request.idkey)
 
-    def Store(self, request, context):
-        return self.StoreRPC(request, context)
+    def Store(self, request : csci4220_hw3_pb2.KeyValue, context):
+        return self.StoreRPC(request.node, request.key, request.value)
 
-    def Quit(self, request, context):
-        return self.QuitRPC(request, context)
+    def Quit(self, request : csci4220_hw3_pb2.IDKey, context):
+        return self.QuitRPC(request.idkey)
 
 
 class KadEventHandler(object):
@@ -30,7 +31,7 @@ class KadEventHandler(object):
         self.me = me 
         self.K = K
         self.routing_table = RoutingTable(N=4, K=K, me=me)
-        self.store = dict()
+        self.kv_store = dict()
         self.BOOTSTRAP = self.bootstrap
         self.FIND_NODE = self.find_node
         self.FIND_VALUE = self.find_value
@@ -47,24 +48,38 @@ class KadEventHandler(object):
         return csci4220_hw3_pb2.NodeList(responding_node=self.me, nodes=kclosest)
 
     def FindValueRPC(self, node : csci4220_hw3_pb2.Node, idkey : int):
-        print(f"Serving FindValue({idkey}) request for {node.id}")
+        print(f"Serving FindKey({idkey}) request for {node.id}")
         try:
             self.routing_table.make_mru(node.id)
         except KeyError:
             self.routing_table.put(node)
 
-        if idkey in self.store:
-            kv = csci4220_hw3_pb2.KeyValue(node=self.me, key=idkey, value=self.store[idkey])
+        if idkey in self.kv_store:
+            kv = csci4220_hw3_pb2.KeyValue(node=self.me, key=idkey, value=self.kv_store[idkey])
             return csci4220_hw3_pb2.KV_Node_Wrapper(responding_node=self.me, mode_kv=True, kv=kv, nodes=[])
         
         kclosest = self.routing_table.k_closest(idkey)
         return csci4220_hw3_pb2.NodeList(responding_node=self.me, nodes=kclosest)
         
 
-    def StoreRPC(self, request, context):
-        pass
-    def QuitRPC(self, request, context):
-        pass
+    def StoreRPC(self, node : csci4220_hw3_pb2.Node, key: int, value: str):
+        print(f'Storing key {key} value "{value}"')
+        try:
+            self.routing_table.make_mru(node.id)
+        except KeyError:
+            self.routing_table.put(node)
+        
+        self.kv_store[key] = value
+        return csci4220_hw3_pb2.IDKey(node=self.me, idkey=key) # return not used
+
+    def QuitRPC(self, id : int):
+        try:
+            self.routing_table.remove(id)
+            print(f'Evicting quitting node {id} from bucket {get_bucket_idx(self.me.id, id)}')
+        except KeyError:
+            print(f'No record of quitting node {id} in k-buckets')
+        return csci4220_hw3_pb2.IDKey(node=self.me, idkey=id)
+
 
     def bootstrap(self, remote_hostname: str, remote_port: int):
         remote_addr = socket.gethostbyname(remote_hostname)
@@ -116,7 +131,7 @@ class KadEventHandler(object):
     
     def find_value(self, key: int):
         print(f'Before FIND_VALUE command, k-buckets are:\n{self.routing_table.buckets_to_str()}')
-        value = self.store[key] if key in self.store else None
+        value = self.kv_store[key] if key in self.kv_store else None
         no_search = True if value is not None else False # deep copy
         asked = set()
         while value is None:
@@ -151,10 +166,28 @@ class KadEventHandler(object):
 
 
     def store(self, key: int, value: str):
-        closest_id = self.routing_table.k_closest(id=key)
-        if 
+        closest_node_arr = self.routing_table.n_closest(id=key, n=1)
+        closest_node = self.me if len(closest_node_arr) == 0 else closest_node_arr[0]
+        if distance(closest_node.id , key) >= distance(self.me.id, key):
+            closest_node = self.me
+            self.kv_store[key] = value
+        else:
+            remote_uri = f"{closest_node.address}:{closest_node.port}"
+            with grpc.insecure_channel(remote_uri) as chan:
+                stub = csci4220_hw3_pb2_grpc.KadImplStub(chan)
+                kv = csci4220_hw3_pb2.KeyValue(node=self.me, key=key, value=value)
+                stub.Store(kv)
+        print(f'Storing key {key} at node {closest_node.id}')
     def quit(self):
-        print(f"QUIT")
+        for node in self.routing_table.all_nodes():
+            remote_uri = f"{node.address}:{node.port}"
+            with grpc.insecure_channel(remote_uri) as chan:
+                stub = csci4220_hw3_pb2_grpc.KadImplStub(chan)
+                print(f'Letting {node.id} know I\'m quitting.')
+                idkey = csci4220_hw3_pb2.IDKey(node=self.me, idkey=self.me.id)
+                stub.Quit(idkey)
+        print(f'Shut down node {self.me.id}')
+
 
     def __getitem__(self, item: str):
         return getattr(self, item)
