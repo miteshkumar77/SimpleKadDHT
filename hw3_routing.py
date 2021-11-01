@@ -1,11 +1,11 @@
 from collections import OrderedDict
+import sys
 from typing import List
 import csci4220_hw3_pb2
 import csci4220_hw3_pb2_grpc
 from hw3_utils import distance, get_bucket_idx, str_to_id, id_to_str
 
-
-
+# LRU Cache using linked hash set
 class LRUCache():
     def __init__(self, MaxSize : int, call_on_evict, call_on_add):
         self.MaxSize: int = MaxSize
@@ -13,44 +13,65 @@ class LRUCache():
         self.call_on_evict = call_on_evict
         self.call_on_add = call_on_add
     
+    # insert a key/value as the most recently used element
+    # evict the least recently used element if needed, and
+    # call the on_evict handler
+    # if the key already exists, nothing happens
     def put(self, key: int, value):
         if key not in self.lru_list:
             self.lru_list[key] = value
-            self.make_mru(key)
             self.call_on_add(key)
             if len(self.lru_list) > self.MaxSize:
                 self.call_on_evict(self.lru_list.popitem(last=False)[0])
+    
+    # remove an element with a particular key from the cache
+    # if an element with key does not exist, raise KeyError
     def remove(self, key : int):
-        self.call_on_evict(key)
-        del self.lru_list[key]
+        if key in self.lru_list:
+            del self.lru_list[key]
+            self.call_on_evict(key)
+        else:
+            raise KeyError
+    
+    # mark element with key as most recently used
+    # if it doesn't exist, raise KeyError
     def make_mru(self, key: int):
         self.lru_list.move_to_end(key, last=True)
     
+    # list elements in order of least recently used
+    # to most recently used
     def list_lru_items(self):
         return self.lru_list.values()
     
+    # return an element with a particular key from the cache
+    # if such a key does not exist, raise KeyError
     def get(self, key : int):
         return self.lru_list[key]
-    
+
+# BinaryNode used within BinaryTrie for k-closest queries
 class BinaryNode():
     def __init__(self):
         self.size = 0
         self.children = [None, None]
         self.isEnd = False
 
+# BinaryTrie used for k-closest queries
 class BinaryTrie():
     def __init__(self):
         self.root = BinaryNode()
     
+    # add an id to the trie
     def add(self, binary_string : str):
         curr = self.root
         for c in (int(ci) for ci in binary_string):
             if curr.children[c] is None:
                 curr.children[c] = BinaryNode()
             curr = curr.children[c]
+
             curr.size += 1
         curr.isEnd = True
     
+    # remove an id from the trie
     def remove(self, binary_string : str):
         prev = None
         curr = self.root
@@ -62,6 +83,8 @@ class BinaryTrie():
                 prev.children[c] = None
                 break
     
+    # get the k closest elements to a particular id within the trie
+    # using xor as distance.
     def k_closest(self, binary_string : str, k : int):
         return self.k_closest_helper(search_binary_string=binary_string, curr_binary_string="", k=k, curr_node=self.root)
 
@@ -81,6 +104,8 @@ class BinaryTrie():
 
         return ret
 
+# routing table used to manage k-buckets and provide k-closest queries
+# on those k-buckets
 class RoutingTable():
     def __init__(self, N: int, K: int, me : csci4220_hw3_pb2.Node):
         self.me = me
@@ -90,15 +115,19 @@ class RoutingTable():
         deleter = lambda key : self.BinTrie.remove(id_to_str(id=key, N=N))
         inserter = lambda key : self.BinTrie.add(id_to_str(id=key, N=N))
         self.LRUList = [LRUCache(K, deleter, inserter) for _ in range(N)]
-    def k_closest(self, id : int) -> List[csci4220_hw3_pb2.Node]:
-        k_closest_strids = self.BinTrie.k_closest(id_to_str(id=id, N=self.N), k=self.K)
-        k_closest_ids = [str_to_id(_id) for _id in k_closest_strids]
-        return [self.id_lookup(_id) for _id in k_closest_ids]
+    
+    # find the n closest elements to an id.
+    # 
+    # wrapper for k_closest in BinaryTrie
     def n_closest(self, id : int, n) -> List[csci4220_hw3_pb2.Node]:
         n_closest_strids = self.BinTrie.k_closest(id_to_str(id=id, N=self.N), k=n)
         n_closest_ids = [str_to_id(_id) for _id in n_closest_strids]
         return [self.id_lookup(_id) for _id in n_closest_ids]
 
+    def k_closest(self, id : int) -> List[csci4220_hw3_pb2.Node]:
+        return self.n_closest(id, self.K)
+
+    # return the LRUCache object that contains an id
     def bucket_of_id(self, id : int):
         return self.LRUList[get_bucket_idx(self.me.id, id)]
     
